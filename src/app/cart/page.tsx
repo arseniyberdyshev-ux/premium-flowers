@@ -2,6 +2,8 @@
 
 import { useCart } from '../../store/useCart';
 import { products } from '../../data/products';
+// 1. Подключаем нашу базу данных к Корзине!
+import { supabase } from '../../lib/supabase'; 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
@@ -14,11 +16,9 @@ export default function Cart() {
     setMounted(true);
   }, []);
 
-  // ЖЕСТКИЙ ФИЛЬТР: пропускаем в корзину только те товары, которые реально есть в базе
   const cartProducts = items.reduce((acc: any[], item: any) => {
     const product = products.find(p => String(p.id) === String(item.id));
     
-    // Добавляем в чек ТОЛЬКО если товар найден
     if (product) {
       acc.push({
         ...product,
@@ -36,15 +36,40 @@ export default function Cart() {
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
+    const customerName = formData.get('name') as string;
+    const phone = formData.get('phone') as string;
+    const address = formData.get('address') as string;
+    const paymentMethod = formData.get('payment') as string;
+
     const orderData = {
-      customerName: formData.get('name'),
-      phone: formData.get('phone'),
-      address: formData.get('address'),
-      paymentMethod: formData.get('payment'),
+      customerName,
+      phone,
+      address,
+      paymentMethod,
       items: cartProducts
     };
 
     try {
+      // 2. МАГИЯ БАЗЫ ДАННЫХ: Сначала сохраняем заказ в Supabase
+      const { error: dbError } = await supabase
+        .from('orders')
+        .insert([
+          {
+            customer_name: customerName,
+            phone: phone,
+            address: address,
+            payment_method: paymentMethod,
+            total_price: total,
+            items: cartProducts
+          }
+        ]);
+
+      if (dbError) {
+        console.error('Ошибка сохранения в базу:', dbError);
+        // Если база недоступна, всё равно попытаемся отправить в Telegram
+      }
+
+      // 3. Отправляем уведомление курьеру в Telegram
       const response = await fetch('/api/telegram', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -55,7 +80,7 @@ export default function Cart() {
         clearCart();
         alert('Заказ успешно оформлен! Мы свяжемся с вами в ближайшее время.');
       } else {
-        throw new Error('Ошибка при отправке');
+        throw new Error('Ошибка при отправке в Telegram');
       }
     } catch (error) {
       console.error(error);
@@ -67,7 +92,6 @@ export default function Cart() {
 
   if (!mounted) return null;
 
-  // Если корзина пуста или в ней только "призраки", показываем красивую заглушку
   if (items.length === 0 || cartProducts.length === 0) {
     return (
       <div className="min-h-screen bg-[linear-gradient(180deg,#F9FAFB_0%,#E8EBEE_27%,#E0E6EB_51%,#EAEDF0_78%,#F9FAFB_100%)] flex flex-col items-center justify-center p-8 text-gray-900">
